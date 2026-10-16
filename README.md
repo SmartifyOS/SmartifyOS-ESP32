@@ -87,6 +87,11 @@ including which transceivers to buy, in DEVICES.md.
 Anything can join, as long as it speaks the same protocol: [PROTOCOL.md](PROTOCOL.md).
 The header SmartifyOS writes for a car is plain C++ with nothing ESP32 in it.
 
+## License
+
+MIT, so your firmware can be under any license you like. The header SmartifyOS writes
+for your car is MIT too.
+
 ## Versions
 
 A release of this library speaks one version of the protocol, and SmartifyOS names the

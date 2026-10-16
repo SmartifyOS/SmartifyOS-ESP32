@@ -1,6 +1,9 @@
 // Written by SmartifyOS from the CAN bus defined in the
 // car's app. Do not change it here: change the app and run it
 // on your computer, and SmartifyOS writes it again.
+//
+// MIT licensed, like the SmartifyOS-ESP32 library, so it can go
+// in firmware under any license.
 #pragma once
 
 #include <stdint.h>

@@ -11,8 +11,17 @@ Put an ESP32 on your car's CAN bus, and it becomes part of
   start, or cannot be reached, is undone by itself.
 
 You write normal Arduino code. The library does the CAN part. You do not need to know
-PlatformIO: the `smartify-os` CLI creates the project, builds it for your board and puts
-it on the ESP32. **The guide for all of that is
+PlatformIO, or install it: the [`smartify-os` CLI](https://github.com/SmartifyOS/SmartifyOS-CLI)
+sets it up by itself and does the rest, from your car's app folder:
+
+```bash
+smartify-os run              # writes firmware/smartify_os_network.h from your car's app
+smartify-os device create    # a project for one device, in devices/<name>/
+smartify-os device flash     # builds it and puts it on the ESP32 over USB (--monitor)
+smartify-os device export    # new firmware for the car to take over the bus, on a USB stick
+```
+
+**The guide for all of that is
 [DEVICES.md](https://github.com/Mauznemo/smartify_os_flutter_test/blob/main/DEVICES.md)
 in SmartifyOS.** This page is about the library itself.
 
@@ -46,7 +55,7 @@ void loop() {
 
 | | |
 | --- | --- |
-| `begin(node, tx, rx)` | Joins the bus. First thing in `setup()`. Optionally the firmware version and the bitrate, both of which the CLI normally sets. |
+| `begin(node, tx, rx)` | Joins the bus. First thing in `setup()`. Optionally the firmware version, which the CLI sets for you (`SMARTIFY_OS_FIRMWARE_VERSION`, raised when your code changes), and the bitrate, 500 kbit/s unless your car's app uses another. |
 | `update()` | Hands what came in to your handlers. Call it every `loop()`. |
 | `send(message)` | Sends one of the structs from `smartify_os_network.h`. |
 | `on<Message>(handler)` | Calls `handler` from `update()` every time `Message` comes in. |
@@ -73,7 +82,14 @@ updated, and shows as stuck rather than as gone.
   is given new firmware or restarted from the car. That is why `begin()` comes first.
 
 Both need the default partition table, with two app slots. A "huge app" table has only
-one, and then the device can only be flashed over USB.
+one, and then the device can only be flashed over USB. The CLI never picks another table,
+and refuses to build one without room for updates.
+
+What the library says about itself (the pins not working, a fault on the bus, safe mode,
+an update coming in) goes out over USB with Arduino's `log_w` and `log_i`, which only
+print when built with `CORE_DEBUG_LEVEL` 3 or more. Projects made by `smartify-os device
+create` are, so `smartify-os device flash --monitor` shows it, and decodes a crash into
+the line of your code it happened on.
 
 ## Wiring, in short
 
@@ -96,7 +112,8 @@ for your car is MIT too.
 
 A release of this library speaks one version of the protocol, and SmartifyOS names the
 release it works with (`smartify_os: firmware:` in SmartifyOS's `pubspec.yaml`), which is
-the one the CLI builds with. The header SmartifyOS writes refuses to compile against a
+the one the CLI builds with: it puts that release into each device's `platformio.ini`
+before every build, so updating the car to a newer SmartifyOS moves its devices on too. The header SmartifyOS writes refuses to compile against a
 library that speaks another protocol.
 
 Built and tried with PlatformIO's `espressif32` 7.1.3 (Arduino for ESP32 2.0.17), on the

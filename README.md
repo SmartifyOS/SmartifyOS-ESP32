@@ -9,6 +9,8 @@ Put an ESP32 on your car's CAN bus, and it becomes part of
 - It can be given new firmware over the bus, from a USB stick plugged into the car, so a
   device hidden behind the dashboard never needs a cable again. A firmware that does not
   start, or cannot be reached, is undone by itself.
+- It can wake the car's computer from sleep when the car is switched on, by pressing its
+  power button.
 
 You write normal Arduino code. The library does the CAN part. You do not need to know
 PlatformIO, or install it: the [`smartify-os` CLI](https://github.com/SmartifyOS/SmartifyOS-CLI)
@@ -62,6 +64,8 @@ void loop() {
 | `sendFrame(id, data, length)` / `onFrame(handler)` | Raw frames, for anything without a definition. |
 | `isBusOk()` | False while the bus has a fault, until it recovers by itself. |
 | `isUpdating()` | True while new firmware comes in. The device restarts into it at the end, so finish anything that must not stop halfway. |
+| `computerState()` / `isComputerRunning()` | What the car's computer is doing: running, asleep, off, restarting, gone quiet, or not heard from yet. |
+| `attachPowerButton(pin)` / `wakeComputer()` | Presses the computer's power button through an optocoupler on `pin` when it sleeps. Call `wakeComputer()` as long as the car is on; it presses once, and only while the computer sleeps or is off. |
 
 Your handlers run inside `update()`, on the same task as `loop()`, so nothing in your code
 runs at the same time as anything else in your code.
@@ -90,6 +94,31 @@ an update coming in) goes out over USB with Arduino's `log_w` and `log_i`, which
 print when built with `CORE_DEBUG_LEVEL` 3 or more. Projects made by `smartify-os device
 create` are, so `smartify-os device flash --monitor` shows it, and decodes a crash into
 the line of your code it happened on.
+
+## Waking the car's computer
+
+A car's computer can sleep while the car is parked instead of switching off, and is then
+back a moment after the car starts. While it sleeps it cannot hear the bus, so a device
+that has power all the time wakes it by pressing its power button:
+
+```cpp
+void setup() {
+  SmartifyOsCan.begin(network::nodes::buttons, GPIO_NUM_5, GPIO_NUM_4);
+  // An optocoupler (a PC817) across the two pins of the computer's power
+  // button, its LED on this pin through a 330 ohm resistor.
+  SmartifyOsCan.attachPowerButton(GPIO_NUM_26);
+}
+
+void loop() {
+  SmartifyOsCan.update();
+  if (ignitionIsOn()) SmartifyOsCan.wakeComputer();
+}
+```
+
+The computer says on the bus when it goes to sleep (see "The car's computer" in
+[PROTOCOL.md](PROTOCOL.md)), and `wakeComputer()` only presses the button then, once,
+remembered through a restart of the device. The car's app names this device as what wakes
+it, `WakeSource.canDevice`, so the computer only sleeps while the device is on the bus.
 
 ## Wiring, in short
 

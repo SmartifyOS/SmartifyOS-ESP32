@@ -36,7 +36,7 @@
 
 // The protocol this library speaks, checked against the one the header
 // SmartifyOS wrote for your car was written for, whichever is included first.
-#define SMARTIFY_OS_PROTOCOL_VERSION 1
+#define SMARTIFY_OS_PROTOCOL_VERSION 2
 #if defined(SMARTIFY_OS_NETWORK_PROTOCOL) && \
     SMARTIFY_OS_NETWORK_PROTOCOL != SMARTIFY_OS_PROTOCOL_VERSION
 #error "smartify_os_network.h was written for another version of this library"
@@ -55,6 +55,22 @@ struct FirmwareVersion {
   uint8_t major;
   uint8_t minor;
   uint8_t patch;
+};
+
+/// What the car's computer is doing, as far as this device has heard.
+enum class ComputerState : uint8_t {
+  /// Not heard from since this device started.
+  unknown,
+  /// Running: it says so once a second.
+  running,
+  /// Asleep: it said it was going to sleep, and has not been heard since.
+  asleep,
+  /// Switched off: it said so, and has not been heard since.
+  off,
+  /// Restarting: it said so, and comes back by itself.
+  restarting,
+  /// Went quiet without saying anything: its power was cut, or it crashed.
+  gone,
 };
 
 /// The CAN bus, as one device on it sees it. Use the `SmartifyOsCan` there
@@ -124,6 +140,38 @@ class Can {
   /// This device's node number.
   uint8_t node() const { return node_; }
 
+  /// What the car's computer is doing, from the heartbeat it sends. That it
+  /// is asleep or switched off is remembered through a restart of this
+  /// device, so a device that lost power for a moment still wakes it.
+  ComputerState computerState() const;
+
+  /// Whether the car's computer is running.
+  bool isComputerRunning() const {
+    return computerState() == ComputerState::running;
+  }
+
+  /// Says that the computer's power button is pressed by [pin], through an
+  /// optocoupler (or a transistor) across the two pins of its power button.
+  /// [activeHigh] is how the pin is driven to press it: high for an
+  /// optocoupler's LED between the pin and ground.
+  ///
+  /// Call it in `setup()` after `begin`, then call [wakeComputer] whenever
+  /// the car is switched on.
+  void attachPowerButton(gpio_num_t pin, bool activeHigh = true);
+
+  /// Wakes the car's computer: presses its power button (see
+  /// [attachPowerButton]) when it is asleep or switched off, and does nothing
+  /// while it runs, restarts, or was never heard from. Returns true when it
+  /// pressed it.
+  ///
+  /// Call it as long as the car is on, every loop is fine: it presses once,
+  /// and again only when the computer has not come back two minutes later.
+  /// A car that cuts the computer's power once it is off, and whose computer
+  /// starts by itself when the power comes back, should only call it while
+  /// [computerState] is `asleep`, since pressing the button of a computer
+  /// that is just starting can switch it off again.
+  bool wakeComputer();
+
   /// Internal: forgets the crashes counted towards safe mode, before a
   /// restart that is meant.
   static void forgetCrashes();
@@ -139,6 +187,8 @@ class Can {
   void run();
   void sendHeartbeat(uint8_t state);
   void handleAlerts();
+  void heardComputer(const twai_message_t& frame);
+  void releasePowerButton();
 
   uint8_t node_ = 0;
   FirmwareVersion firmware_ = {0, 0, 0};
@@ -147,6 +197,12 @@ class Can {
   bool safeMode_ = false;
   volatile uint32_t lastUpdateCall_ = 0;
   QueueHandle_t inbox_ = nullptr;
+  volatile ComputerState computerSaid_ = ComputerState::unknown;
+  volatile uint32_t computerHeardAt_ = 0;
+  int powerButtonPin_ = -1;
+  bool powerButtonActiveHigh_ = true;
+  volatile uint32_t pressedAt_ = 0;
+  volatile bool pressing_ = false;
   Updater updater_;
   std::vector<Handler> handlers_;
   std::function<void(const twai_message_t&)> anyFrame_;

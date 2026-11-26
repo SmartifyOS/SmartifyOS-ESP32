@@ -11,7 +11,7 @@
 
 // The protocol this header was written for, checked against the
 // SmartifyOS-ESP32 library's own whichever is included first.
-#define SMARTIFY_OS_NETWORK_PROTOCOL 1
+#define SMARTIFY_OS_NETWORK_PROTOCOL 2
 #if defined(SMARTIFY_OS_PROTOCOL_VERSION) && \
     SMARTIFY_OS_PROTOCOL_VERSION != SMARTIFY_OS_NETWORK_PROTOCOL
 #error "This header was written for another version of the SmartifyOS-ESP32 library"

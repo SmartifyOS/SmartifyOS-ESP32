@@ -6,6 +6,11 @@
 // the bus: the headlights wink by themselves on the wink button, and the
 // screen skips tracks on the other two.
 //
+// It has power all the time, so it is also what wakes the car's computer
+// when the ignition comes on: it presses the computer's power button through
+// an optocoupler while the computer sleeps (WakeSource.canDevice in the
+// app's SleepConfig, see DEVICES.md in SmartifyOS).
+//
 // smartify_os_network.h next to this file is the one SmartifyOS wrote for the
 // Miata. Your own car's comes from its app, see DEVICES.md in SmartifyOS.
 
@@ -15,6 +20,11 @@
 
 constexpr gpio_num_t canTx = GPIO_NUM_5;
 constexpr gpio_num_t canRx = GPIO_NUM_4;
+
+// The ignition through a voltage divider or an optocoupler, high while it
+// is on, and the optocoupler across the computer's power button.
+constexpr uint8_t ignitionPin = 27;
+constexpr gpio_num_t powerButtonPin = GPIO_NUM_26;
 
 // Each button, wired between its pin and ground.
 struct Button {
@@ -35,12 +45,17 @@ Button buttons[] = {
 constexpr uint32_t debounceMs = 30;
 
 void setup() {
-  for (Button& b : buttons) pinMode(b.pin, INPUT_PULLUP);
   SmartifyOsCan.begin(network::nodes::buttons, canTx, canRx);
+  SmartifyOsCan.attachPowerButton(powerButtonPin);
+  for (Button& b : buttons) pinMode(b.pin, INPUT_PULLUP);
+  pinMode(ignitionPin, INPUT);
 }
 
 void loop() {
   SmartifyOsCan.update();
+
+  // Presses the button only while the computer sleeps, and once.
+  if (digitalRead(ignitionPin) == HIGH) SmartifyOsCan.wakeComputer();
 
   for (Button& b : buttons) {
     const bool down = digitalRead(b.pin) == LOW;

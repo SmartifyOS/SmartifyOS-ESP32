@@ -1,5 +1,6 @@
 #include "SmartifyOsCan.h"
 
+#include <Preferences.h>
 #include <esp_attr.h>
 #include <esp_system.h>
 
@@ -25,6 +26,37 @@ constexpr uint32_t stuckAfterMs = 3000;
 constexpr uint32_t crashMagic = 0x534F5343;  // "SOSC"
 RTC_NOINIT_ATTR uint32_t keptMagic;
 RTC_NOINIT_ATTR uint32_t keptCrashes;
+
+// How long the computer's power button is held for a short press, and how
+// long to wait for the computer to come back before pressing it again.
+constexpr uint32_t pressMs = 300;
+constexpr uint32_t pressAgainAfterMs = 120000;
+
+// Where that the computer is asleep or off is kept, so it lasts through a
+// restart of this device.
+constexpr const char* keptNamespace = "smartify_os";
+constexpr const char* keptComputerKey = "computer";
+
+bool isAsleepOrOff(ComputerState state) {
+  return state == ComputerState::asleep || state == ComputerState::off;
+}
+
+void keepComputerState(ComputerState state) {
+  Preferences kept;
+  if (!kept.begin(keptNamespace, false)) return;
+  kept.putUChar(keptComputerKey, static_cast<uint8_t>(state));
+  kept.end();
+}
+
+ComputerState keptComputerState() {
+  Preferences kept;
+  // Fails until something was kept, which is the same as nothing.
+  if (!kept.begin(keptNamespace, true)) return ComputerState::unknown;
+  const auto state =
+      static_cast<ComputerState>(kept.getUChar(keptComputerKey, 0));
+  kept.end();
+  return isAsleepOrOff(state) ? state : ComputerState::unknown;
+}
 
 bool wasCrash(esp_reset_reason_t reason) {
   return reason == ESP_RST_PANIC || reason == ESP_RST_INT_WDT ||
@@ -72,6 +104,7 @@ bool Can::begin(uint8_t node, gpio_num_t tx, gpio_num_t rx,
   if (keptMagic != crashMagic) forgetCrashes();
   if (wasCrash(esp_reset_reason())) keptCrashes++;
   safeMode_ = keptCrashes >= crashesForSafeMode;
+  computerSaid_ = keptComputerState();
 
   twai_general_config_t general =
       TWAI_GENERAL_CONFIG_DEFAULT(tx, rx, TWAI_MODE_NORMAL);
@@ -124,6 +157,10 @@ void Can::run() {
   for (;;) {
     twai_message_t frame;
     if (twai_receive(&frame, pdMS_TO_TICKS(20)) == ESP_OK && !frame.rtr) {
+      if (!frame.extd && frame.identifier == protocol::computerHeartbeat &&
+          frame.data_length_code > 0) {
+        heardComputer(frame);
+      }
       if (!frame.extd && frame.identifier == protocol::requestBase + node_) {
         updater_.handle(frame);
       } else if (!safeMode_) {
@@ -135,6 +172,7 @@ void Can::run() {
     handleAlerts();
     const uint32_t now = millis();
     updater_.tick(now);
+    if (pressing_ && now - pressedAt_ >= pressMs) releasePowerButton();
 
     if (now - lastHeartbeat >= heartbeatIntervalMs) {
       lastHeartbeat = now;
@@ -193,6 +231,68 @@ void Can::sendHeartbeat(uint8_t state) {
                            0,
                            0};
   sendFrame(protocol::heartbeatBase + node_, data, sizeof data);
+}
+
+void Can::heardComputer(const twai_message_t& frame) {
+  computerHeardAt_ = millis();
+  ComputerState now = ComputerState::running;
+  if (frame.data[0] == protocol::stateComputerGoing &&
+      frame.data_length_code > 2) {
+    switch (frame.data[2]) {
+      case protocol::computerGoingToSleep:
+        now = ComputerState::asleep;
+        break;
+      case protocol::computerGoingOff:
+        now = ComputerState::off;
+        break;
+      case protocol::computerRestarting:
+        now = ComputerState::restarting;
+        break;
+    }
+  }
+  const ComputerState before = computerSaid_;
+  computerSaid_ = now;
+  // Back: the next time it sleeps, it can be woken straight away.
+  if (now == ComputerState::running && !pressing_) pressedAt_ = 0;
+  // Written only when it goes to sleep, switches off or comes back from
+  // either, so the flash is not written once a second.
+  if (isAsleepOrOff(now) != isAsleepOrOff(before) ||
+      (isAsleepOrOff(now) && now != before)) {
+    keepComputerState(isAsleepOrOff(now) ? now : ComputerState::unknown);
+  }
+}
+
+ComputerState Can::computerState() const {
+  const ComputerState said = computerSaid_;
+  if (said != ComputerState::running) return said;
+  return millis() - computerHeardAt_ < protocol::computerTimeoutMs
+             ? ComputerState::running
+             : ComputerState::gone;
+}
+
+void Can::attachPowerButton(gpio_num_t pin, bool activeHigh) {
+  powerButtonPin_ = pin;
+  powerButtonActiveHigh_ = activeHigh;
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, activeHigh ? LOW : HIGH);
+}
+
+bool Can::wakeComputer() {
+  if (powerButtonPin_ < 0 || pressing_) return false;
+  if (!isAsleepOrOff(computerState())) return false;
+  const uint32_t now = millis();
+  if (pressedAt_ != 0 && now - pressedAt_ < pressAgainAfterMs) return false;
+  digitalWrite(powerButtonPin_, powerButtonActiveHigh_ ? HIGH : LOW);
+  // Never 0, which means it was not pressed.
+  pressedAt_ = now == 0 ? 1 : now;
+  pressing_ = true;
+  log_i("SmartifyOS: pressing the computer's power button to wake it");
+  return true;
+}
+
+void Can::releasePowerButton() {
+  digitalWrite(powerButtonPin_, powerButtonActiveHigh_ ? LOW : HIGH);
+  pressing_ = false;
 }
 
 void Can::handleAlerts() {

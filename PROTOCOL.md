@@ -4,7 +4,8 @@ How the car's computer and its devices talk over CAN. The ESP32 library speaks i
 you; this is for writing firmware for something else, and for knowing what is on the
 bus when you look at it with a CAN tool.
 
-Protocol version **1**.
+Protocol version **2**. Version 2 added the car's computer's own heartbeat, see "The car's
+computer".
 
 ## The bus
 
@@ -26,9 +27,10 @@ moment.
 | `0x580` + node | A device answering the car's computer. |
 | `0x600` + node | The car's computer asking a device something. |
 | `0x700` + node | A device's heartbeat. |
+| `0x700` | The car's computer's heartbeat, as node 0. |
 
 The last three are where CANopen has the same things, so CAN tools already show them
-sensibly. Node numbers go from 1 to 127.
+sensibly. Node numbers go from 1 to 127; node 0 is the car's computer.
 
 **Only one device sends each message.** Two devices sending the same identifier at the
 same moment garble each other, which CAN reports as errors. When two devices can ask
@@ -65,7 +67,7 @@ stuck. The car's computer counts a device as gone after 3.5 seconds without one.
 | Byte | What |
 | --- | --- |
 | 0 | State, see below |
-| 1 | The protocol version it speaks, `1` |
+| 1 | The protocol version it speaks, `2` |
 | 2, 3, 4 | Its firmware version: major, minor, patch |
 | 5 | Flags, see below |
 | 6, 7 | Not used yet, `0` |
@@ -89,6 +91,28 @@ Flags:
 
 Only byte 0 is required; a device that sends just that shows up without a firmware
 version, as running.
+
+## The car's computer
+
+The car's computer sends a heartbeat of its own on `0x700`, as node 0, so every device knows
+whether it is running. While it runs it sends one once a second; right before it goes to
+sleep, switches off or restarts it sends three in a row saying so, and then nothing until
+it is back.
+
+| Byte | What |
+| --- | --- |
+| 0 | `0x05` running, `0x04` about to go (CANopen's "stopped") |
+| 1 | The protocol version it speaks, `2` |
+| 2 | While byte 0 is `0x04`, what it is about to do: `0x01` sleep, `0x02` switch off, `0x03` restart. `0` while it runs |
+
+A computer that is asleep cannot hear the bus: its processor is stopped until something
+wakes it electrically. A device that wakes it (`WakeSource.canDevice` in the car's app)
+does so by pressing the computer's power button, through an optocoupler across its two
+pins, once the car is switched on while the computer said it was going to sleep. That
+the computer is asleep or off is worth remembering through a restart of the device, and
+a computer that goes quiet without saying anything (its power was cut) is best left
+alone, since pressing the button of a computer that is just starting can switch it off
+again. The ESP32 library does all of this in `wakeComputer()`.
 
 ## Requests and answers
 

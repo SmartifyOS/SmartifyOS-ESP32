@@ -24,6 +24,18 @@ constexpr uint8_t flagCodeRunning = 0x01;
 constexpr uint8_t flagOnTrial = 0x02;
 constexpr uint8_t flagRolledBack = 0x04;
 
+// The car's computer's own heartbeat: node 0. Byte 0 is its state, byte 2
+// what it is about to do while that is stateComputerGoing.
+constexpr uint32_t computerHeartbeat = heartbeatBase;
+constexpr uint8_t stateComputerGoing = 0x04;
+constexpr uint8_t computerGoingToSleep = 0x01;
+constexpr uint8_t computerGoingOff = 0x02;
+constexpr uint8_t computerRestarting = 0x03;
+
+// How long without a heartbeat before the computer counts as gone, the same
+// as SmartifyOS waits for a device.
+constexpr uint32_t computerTimeoutMs = 3500;
+
 // Byte 0 of a request. The answer has the top bit set.
 constexpr uint8_t requestBegin = 0x01;
 constexpr uint8_t requestBlock = 0x02;
